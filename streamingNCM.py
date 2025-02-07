@@ -52,7 +52,7 @@ class StreamingNCM:
         self.update_neighbor_densities()
 
     def retrain(self):
-        self.training_subsequences = copy.deepcopy(d)
+        self.training_subsequences = copy.deepcopy(self.subsequence_buffer)
         self.update_neighbor_densities()
 
 
@@ -119,7 +119,7 @@ class StreamingNCM:
         self.calibration_scores.append(score)
         self.calibration_buffer.append(subsequence)  # Store the normal subsequence
 
-    def compute_p_value(self, test_score):
+    def compute_p_value(self, test_score, smoothed=True):
         """
         Compute the p-value of a new subsequence based on the stored calibration scores.
 
@@ -130,7 +130,12 @@ class StreamingNCM:
         if len(self.calibration_scores) == 0:
             return 1.0  # Default high p-value if no calibration data
 
-        return np.mean(np.array(self.calibration_scores) >= test_score)
+        if smoothed:
+            n = len(np.array(self.calibration_scores))+1
+            tau = np.random.uniform(0, 1)
+            return (np.sum(np.array(self.calibration_scores) > test_score) + tau*np.sum(np.array(self.calibration_scores) == test_score))/n
+        else:
+            return np.mean(np.array(self.calibration_scores) >= test_score)
 
 
 
@@ -146,19 +151,13 @@ if __name__ == "__main__":
        [5, 5], [6, 6], [7, 7], [8, 8], [2000, 2500], [20, 20], [6, 6], [1, 1]
     ]
 
-    # First phase: Calibration (assume normal data)
-    for point in stream_data[:15]:
-       streaming_ncm.update(point)
-       test_subsequence = np.array(streaming_ncm.subsequence_buffer[-1])
-       score = streaming_ncm.calculate_lof(test_subsequence)
-       streaming_ncm.update_calibration(score, test_subsequence)  # Store as normal
+    for point in stream_data:
+        test_subsequence = streaming_ncm.update(point)
+        test_score = streaming_ncm.calculate_lof(test_subsequence)
 
-    # Second phase: Anomaly detection
-    for point in stream_data[15:]:
-       streaming_ncm.update(point)
-       test_subsequence = np.array(streaming_ncm.subsequence_buffer[-1])
-       test_score = streaming_ncm.calculate_lof(test_subsequence)
-       p_value = streaming_ncm.compute_p_value(test_score)
-       is_anomalous = p_value < 0.05  # Threshold for anomaly detection
+        if test_score is not None:
+            streaming_ncm.update_calibration(test_score, test_subsequence)
+            p_value = streaming_ncm.compute_p_value(test_score)
+            is_anomalous = p_value < 0.05  # Anomaly threshold
 
-       print(f"Point: {point}, Anomalous? {is_anomalous}, P-value: {p_value}")
+            print(f"Point: {point}, Anomalous? {is_anomalous}, P-value: {p_value}")
