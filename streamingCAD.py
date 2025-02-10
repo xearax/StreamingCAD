@@ -25,7 +25,7 @@ class StreamingICAD:
 
         if len(self.ncm.training_subsequences)<self.min_train or (len(self.ncm.training_subsequences) < self.ncm.w or len(self.ncm.training_subsequences) < self.ncm.k):
             self.ncm.update(new_point, update_densities=True)
-            print("Training...")
+            #print("Training...")
             return None  # Not enough data yet
         else:
             self.ncm.update(new_point)
@@ -33,10 +33,10 @@ class StreamingICAD:
         test_subsequence = np.array(self.ncm.subsequence_buffer[-1])
         test_score = self.ncm.calculate_lof(test_subsequence)
 
-        # Continue calibration until np.inf is removed
+        # Continue calibration until np.inf is removed and calibration set is filled.
         if len(self.ncm.calibration_scores) < self.ncm.calibration_size or any(np.isinf(score) for score in self.ncm.calibration_scores):
             self.ncm.update_calibration(test_score, test_subsequence)
-            print("🔄 Calibrating... (still contains np.inf)")
+            #print("🔄 Calibrating... (still contains np.inf)")
             return None  # Keep calibrating
 
         p_value = self.ncm.compute_p_value(test_score)
@@ -62,6 +62,9 @@ if __name__ == "__main__":
        [5, 5], [6, 6], [7, 7], [8, 8], [0, 0], [1, 1], [2, 2], [3, 3], [4, 4],
        [5, 5], [6, 6], [7, 7], [8, 8], [2000, 2500], [20, 20], [6, 6], [1, 1], [1, 1], [2, 2], [3, 3], [4, 4]
     ]
+
+    #stream_data = list(np.array(stream_data).flat) #de-comment to test with 1d-data
+
     for point in stream_data:
         result = streaming_icad.process_stream(point)
 

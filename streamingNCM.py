@@ -33,6 +33,8 @@ class StreamingNCM:
 
         :param new_point: A new data point (e.g., 2D coordinate [x, y]).
         """
+        new_point = np.atleast_1d(new_point)
+
         if update_densities==False and (self.neighbor_densities is None):
             self.update_neighbor_densities()
 
@@ -52,7 +54,7 @@ class StreamingNCM:
         self.update_neighbor_densities()
 
     def retrain(self):
-        self.training_subsequences = copy.deepcopy(self.subsequence_buffer)
+        self.training_subsequences = copy.deepcopy(self.subsequence_buffer) #TODO: this copy shouldn't include the calibrations set
         self.update_neighbor_densities()
 
 
