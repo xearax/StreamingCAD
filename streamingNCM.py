@@ -27,7 +27,7 @@ class StreamingNCM:
         self.calibration_scores = deque(maxlen=calibration_size)  # Stores nonconformity scores for calibration
         self.neighbor_densities = None  # Store precomputed neighbor densities
 
-    def update(self, new_point, update_densities=False):
+    def update(self, new_point, updating_densities=False):
         """
         Update the subsequence buffer with a new data point.
 
@@ -35,7 +35,7 @@ class StreamingNCM:
         """
         new_point = np.atleast_1d(new_point)
 
-        if update_densities==False and (self.neighbor_densities is None):
+        if not updating_densities and (self.neighbor_densities is None):
             self.update_neighbor_densities()
 
         if len(self.subsequence_buffer) > 0:
@@ -45,7 +45,7 @@ class StreamingNCM:
             new_subsequence = np.array([new_point] * self.w)  # Fill with duplicates initially
 
         self.subsequence_buffer.append(new_subsequence)
-        if update_densities:
+        if updating_densities:
             self.training_subsequences.append(new_subsequence)
 
     def fit(self, points):
