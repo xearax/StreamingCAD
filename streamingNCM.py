@@ -1,6 +1,7 @@
 from collections import deque
 import numpy as np
-from scipy.spatial.distance import cdist
+from sklearn.neighbors import NearestNeighbors
+
 import copy
 
 class StreamingNCM:
@@ -27,25 +28,25 @@ class StreamingNCM:
         self.calibration_scores = deque(maxlen=calibration_size)  # Stores nonconformity scores for calibration
         self.neighbor_densities = None  # Store precomputed neighbor densities
 
-    def update(self, new_point, updating_densities=False):
+    def update(self, new_point, update_densities=False):
         """
         Update the subsequence buffer with a new data point.
 
         :param new_point: A new data point (e.g., 2D coordinate [x, y]).
         """
         new_point = np.atleast_1d(new_point)
-
-        if not updating_densities and (self.neighbor_densities is None):
+        
+        if not update_densities and (self.neighbor_densities is None):
             self.update_neighbor_densities()
 
         if len(self.subsequence_buffer) > 0:
             last_subsequence = self.subsequence_buffer[-1]
-            new_subsequence = np.vstack((last_subsequence[1:], new_point))
+            new_subsequence = np.append(last_subsequence[1:], new_point)
         else:
-            new_subsequence = np.array([new_point] * self.w)  # Fill with duplicates initially
+            new_subsequence = np.full(self.w, new_point)  # Fill with duplicates initially
 
         self.subsequence_buffer.append(new_subsequence)
-        if updating_densities:
+        if update_densities:
             self.training_subsequences.append(new_subsequence)
 
     def fit(self, points):
@@ -54,30 +55,31 @@ class StreamingNCM:
         self.update_neighbor_densities()
 
     def retrain(self):
-        self.training_subsequences = copy.deepcopy(self.subsequence_buffer) #TODO: this copy shouldn't include the calibrations set
+        self.training_subsequences = copy.deepcopy(self.subsequence_buffer)
         self.update_neighbor_densities()
-
 
     def update_neighbor_densities(self):
         """
-        Recompute neighbor densities whenever the calibration set is updated.
+        Recompute neighbor densities using KDTree, instead of cdist which is O(N^2) memory-wise
         """
         if len(self.training_subsequences) < self.k:
             self.neighbor_densities = None
-            #print(f"{len(self.training_subsequences)}<{self.k}")
             return
-
+    
         subsequences = np.array(self.training_subsequences)
-        distances = cdist(subsequences.reshape(len(subsequences), -1), subsequences.reshape(len(subsequences), -1), metric=self.distance_metric)
-
+        #subsequences = np.array(self.training_subsequences, dtype=np.float32) #32bit precision rather than 64 to half the used memory
+    
+        # Use KDTree since only one feature and euclidian distances (if non-euclidian metric is used the switch to KDTree, also if >20 features.
+        nbrs = NearestNeighbors(n_neighbors=self.k, algorithm='kd_tree', metric=self.distance_metric).fit(subsequences)
+        distances, indices = nbrs.kneighbors(subsequences)
+    
         neighbor_densities = []
         for i in range(len(subsequences)):
-            threshold_distance = np.partition(distances[i], self.k - 1)[self.k - 1]
-            neighbors = np.where(distances[i] <= threshold_distance)[0]
-            reachability_distances = np.maximum(distances[i][neighbors], threshold_distance)
-            neighbor_density = len(neighbors) / np.sum(reachability_distances)
+            threshold_distance = distances[i, -1]
+            reachability_distances = np.maximum(distances[i], threshold_distance)
+            neighbor_density = self.k / np.sum(reachability_distances)
             neighbor_densities.append(neighbor_density)
-
+    
         self.neighbor_densities = np.array(neighbor_densities)
 
     def calculate_lof(self, test_subsequence, epsilon=1e-8):
