@@ -1,6 +1,7 @@
 from collections import deque
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
+from scipy.spatial.distance import cdist
 
 import copy
 
@@ -27,26 +28,33 @@ class StreamingNCM:
         self.calibration_buffer = deque(maxlen=calibration_size)  # Stores only normal subsequences
         self.calibration_scores = deque(maxlen=calibration_size)  # Stores nonconformity scores for calibration
         self.neighbor_densities = None  # Store precomputed neighbor densities
+        self.kdtree = None # Store precomputed KD-tree
 
-    def update(self, new_point, update_densities=False):
+    def update(self, new_point, updating_densities=False):
         """
         Update the subsequence buffer with a new data point.
 
         :param new_point: A new data point (e.g., 2D coordinate [x, y]).
         """
         new_point = np.atleast_1d(new_point)
-        
-        if not update_densities and (self.neighbor_densities is None):
+
+        if not updating_densities and (self.neighbor_densities is None):
             self.update_neighbor_densities()
 
         if len(self.subsequence_buffer) > 0:
             last_subsequence = self.subsequence_buffer[-1]
-            new_subsequence = np.append(last_subsequence[1:], new_point)
+            if new_point.shape[0] > 1:
+                new_subsequence = np.vstack((last_subsequence[1:], new_point))
+            else:
+                new_subsequence = np.append(last_subsequence[1:], new_point)
         else:
-            new_subsequence = np.full(self.w, new_point)  # Fill with duplicates initially
+            if new_point.shape[0] > 1:
+                new_subsequence = np.array([new_point]*self.w)
+            else:
+                new_subsequence = np.full(self.w, new_point)  # Fill with duplicates initially
 
         self.subsequence_buffer.append(new_subsequence)
-        if update_densities:
+        if updating_densities:
             self.training_subsequences.append(new_subsequence)
 
     def fit(self, points):
@@ -65,21 +73,24 @@ class StreamingNCM:
         if len(self.training_subsequences) < self.k:
             self.neighbor_densities = None
             return
-    
+
         subsequences = np.array(self.training_subsequences)
         #subsequences = np.array(self.training_subsequences, dtype=np.float32) #32bit precision rather than 64 to half the used memory
-    
-        # Use KDTree since only one feature and euclidian distances (if non-euclidian metric is used the switch to KDTree, also if >20 features.
-        nbrs = NearestNeighbors(n_neighbors=self.k, algorithm='kd_tree', metric=self.distance_metric).fit(subsequences)
-        distances, indices = nbrs.kneighbors(subsequences)
-    
+
+        if subsequences.ndim <= 2:
+            # Use KDTree since only one feature and euclidian distances (if non-euclidian metric is used the switch to KDTree, also if >20 features.
+            self.kdtree = NearestNeighbors(n_neighbors=self.k, algorithm='kd_tree', metric=self.distance_metric).fit(subsequences)
+            distances, indices = self.kdtree.kneighbors(subsequences)
+        else:
+            distances = cdist(subsequences.reshape(len(subsequences), -1), subsequences.reshape(len(subsequences), -1), metric=self.distance_metric)
+
         neighbor_densities = []
         for i in range(len(subsequences)):
             threshold_distance = distances[i, -1]
             reachability_distances = np.maximum(distances[i], threshold_distance)
             neighbor_density = self.k / np.sum(reachability_distances)
             neighbor_densities.append(neighbor_density)
-    
+
         self.neighbor_densities = np.array(neighbor_densities)
 
     def calculate_lof(self, test_subsequence, epsilon=1e-8):
@@ -93,7 +104,11 @@ class StreamingNCM:
             return np.inf  # Not enough data
 
         subsequences = np.array(self.training_subsequences)
-        distances = cdist([test_subsequence.flatten()], subsequences.reshape(len(subsequences), -1), metric=self.distance_metric).flatten()
+        # If the data is suitable for KD-Tree, we use that since it's alot faster
+        if subsequences.ndim <= 2 and self.kdtree is not None:
+            distances, _ = self.kdtree.kneighbors(subsequences)
+        else:
+            distances = cdist([test_subsequence.flatten()], subsequences.reshape(len(subsequences), -1), metric=self.distance_metric).flatten()
 
         threshold_distance = np.partition(distances, self.k - 1)[self.k - 1]
         neighbors = np.where(distances <= threshold_distance)[0]
