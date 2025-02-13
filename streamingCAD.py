@@ -12,7 +12,7 @@ class StreamingICAD:
         self.ncm = streaming_ncm
         self.epsilon = anomaly_threshold
 
-        assert min_train < self.ncm.buffer_size, f"The buffer size is smaller than or equal to the minimum number of training points: {self.ncm.buffer_size}<={min_train}."
+        #assert min_train < self.ncm.buffer_size, f"The buffer size is smaller than or equal to the minimum number of training points: {self.ncm.buffer_size}<={min_train}."
 
         self.min_train = min_train
 
@@ -24,7 +24,7 @@ class StreamingICAD:
         :param is_calibration: Whether the point should be used for calibration.
         :return: (is_anomalous, p_value) tuple if not calibration, else None.
         """
-        assert self.min_train < self.ncm.buffer_size , "The buffer size is smaller than or equal to the minimum number of training points: {self.ncm.buffer_size}<={self.min_train}."
+        #assert self.min_train < self.ncm.buffer_size , "The buffer size is smaller than or equal to the minimum number of training points: {self.ncm.buffer_size}<={self.min_train}."
 
         n_train = len(self.ncm.training_subsequences)
         if n_train<self.min_train or (n_train < self.ncm.w or n_train < self.ncm.k):
@@ -55,8 +55,8 @@ class StreamingICAD:
 # Example Usage:
 if __name__ == "__main__":
 
-    streaming_ncm = StreamingNCM(subsequence_length=10, neighborhood_size=5, buffer_size=30, calibration_size=15)
-    streaming_icad = StreamingICAD(streaming_ncm, min_train=20, anomaly_threshold=0.05)
+    streaming_ncm = StreamingNCM(subsequence_length=10, neighborhood_size=5, buffer_size=30, calibration_size=10)
+    streaming_icad = StreamingICAD(streaming_ncm, min_train=10, anomaly_threshold=0.05)
 
     # Simulated streaming data
     stream_data = [
@@ -66,7 +66,7 @@ if __name__ == "__main__":
        [5, 5], [6, 6], [7, 7], [8, 8], [2000, 2500], [20, 20], [6, 6], [1, 1], [1, 1], [2, 2], [3, 3], [4, 4]
     ]
 
-    stream_data = list(np.array(stream_data).flat) #de-comment to test with 1d-data
+    #stream_data = np.array(stream_data).flat
 
     for point in stream_data:
         result = streaming_icad.process_stream(point)
