@@ -1,27 +1,71 @@
 import numpy as np
 
 from streamingNCM import StreamingNCM
+from collections import deque
 
 
 class StreamingICAD:
     def __init__(self, streaming_ncm, anomaly_threshold=0.05, min_train=100):
         """
-        Initialize Streaming ICAD.
+        Initialize a Streaming ICAD (Incremental Contour Anomaly Detector).
 
-        :param streaming_ncm: Instance of StreamingNCM.
-        :param anomaly_threshold: Threshold for anomaly detection.
+        Parameters
+        ----------
+        streaming_ncm : StreamingNCM
+            The underlying streaming nearest‑neighbour classifier that
+            provides LOF scores and maintains a sliding buffer.
+        anomaly_threshold : float, optional
+            Initial target false‑positive rate (default 0.05).  The algorithm
+            will try to keep the empirical FPR close to this value by
+            adaptively adjusting :pyattr:`epsilon`.
+        min_train : int, optional
+            Minimum number of training points required before the detector
+            starts producing decisions.  Defaults to 100.
+
+        Attributes
+        ----------
+        ncm : StreamingNCM
+            Reference to the underlying model.
+        epsilon : float
+            Current anomaly threshold used for decision making.
+        target_fpr : float
+            Desired false‑positive rate that drives the epsilon update.
+        min_train : int
+            Minimum training sample count.
+        recent_anomaly_flags : collections.deque
+            Sliding window of the most recent anomaly decisions (``True``/``False``).
         """
         self.ncm = streaming_ncm
         self.epsilon = anomaly_threshold
-
-        # assert min_train < self.ncm.buffer_size, f"The buffer size is smaller than or equal to the minimum number of training points: {self.ncm.buffer_size}<={min_train}."
-
+        self.target_epsilon = anomaly_threshold
         self.min_train = min_train
+        self.recent_anomaly_flags = deque(maxlen=self.ncm.calibration_size)
+
+    def _adjust_epsilon(self):
+        """
+        Adjust the anomaly threshold (``epsilon``) toward the target FPR.
+
+        The function computes the empirical false‑positive rate from
+        :pyattr:`recent_anomaly_flags` and moves ``epsilon`` 10 % of the
+        way toward the maximum of the observed FPR and the desired
+        ``target_fpr``.  This smoothing prevents abrupt threshold
+        changes when the stream contains bursts of anomalies.
+        """
+
+        # proportion of recent points that were flagged as anomalies
+        observed_anomalies = np.mean(self.recent_anomaly_flags)
+        # Push ε toward the target (self.target_fpr) but smooth it
+        self.epsilon = 0.9 * self.epsilon + 0.1 * max(observed_fpr, self.target_epsilon)
 
     def _update_quantiles(self):
-        """Re‑compute the calibration quantiles every time the calibration
-        set changes.  This keeps the odds of a false‑alarm at the target
-        level ε."""
+        """
+        Re‑compute the calibration quantiles every time the calibration
+        set changes.  These quantiles are used to construct a confidence
+        interval for the LOF score of a new point.
+
+        The upper bound corresponds to the (1‑ε)‑th percentile of the
+        calibration scores, while the lower bound is the ε‑th percentile.
+        """
         # `self.ncm.calibration_scores` is a list of LOF scores.
         self.calibration_quantiles = {
             # 1‑ε quantile – the upper bound of the normal region
@@ -32,11 +76,29 @@ class StreamingICAD:
 
     def process_stream(self, new_point, return_score=False, return_interval=False):
         """
-        Process a new data point from the stream.
+        Process a new data point from the stream and optionally return
+        diagnostic information.
 
-        :param new_point: A new data point (e.g., [x, y]).
-        :param is_calibration: Whether the point should be used for calibration.
-        :return: (is_anomalous, p_value) tuple if not calibration, else None.
+        Parameters
+        ----------
+        new_point : array‑like
+            The incoming observation (e.g., ``[x, y]``).
+        return_score : bool, optional
+            If ``True``, the raw LOF score is returned as the first
+            element of the output tuple instead of the boolean anomaly
+            flag.  Defaults to ``False``.
+        return_interval : bool, optional
+            If ``True``, the method also returns a tuple
+            ``(lower, upper)`` describing the confidence interval for
+            the LOF score derived from the current calibration set.
+
+        Returns
+        -------
+        tuple or None
+            ``(is_anomalous, p_value)`` if a decision is made,
+            ``(is_anomalous, p_value, (low, high))`` if
+            ``return_interval`` is ``True``, and ``None`` while the
+            model is still in the calibration phase.
         """
         # assert self.min_train < self.ncm.buffer_size , "The buffer size is smaller than or equal to the minimum number of training points: {self.ncm.buffer_size}<={self.min_train}."
 
@@ -44,8 +106,8 @@ class StreamingICAD:
         if n_train < self.min_train or (n_train < self.ncm.w or n_train < self.ncm.k):
             self.ncm.update(new_point, updating_densities=True)
             return None  # Not enough data yet
-        else:
-            self.ncm.update(new_point)
+
+        self.ncm.update(new_point)
 
         test_subsequence = np.array(self.ncm.subsequence_buffer[-1])
         test_score = self.ncm.calculate_lof(test_subsequence)
@@ -53,20 +115,24 @@ class StreamingICAD:
         # Continue calibration until np.inf is removed and calibration set is filled.
         if len(self.ncm.calibration_scores) < self.ncm.calibration_size or any(np.isinf(score) for score in self.ncm.calibration_scores):
             self.ncm.update_calibration(test_score, test_subsequence)
-            # print("Calibrating... (still contains np.inf)")
             return None  # Keep calibrating
-        else:
-            # keep the quantiles up‑to‑date
-            self._update_quantiles()
+
+        self._update_quantiles()
 
         p_value = self.ncm.compute_p_value(test_score)
         if p_value > self.epsilon:
             self.ncm.update_calibration(test_score, test_subsequence)
 
-        if return_score is True:
+        # Store anomaly flag for recent points
+        anomaly_flag = p_value < self.epsilon
+        self.recent_anomaly_flags.append(anomaly_flag)
+
+        #self._adjust_epsilon()
+
+        if return_score:
             is_anomalous = test_score
         else:
-            is_anomalous = p_value < self.epsilon
+            is_anomalous = anomaly_flag
 
         if return_interval:
             low = self.calibration_quantiles["lower"]
