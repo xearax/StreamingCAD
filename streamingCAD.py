@@ -15,9 +15,7 @@ class StreamingICAD:
             The underlying streaming nearest‑neighbour classifier that
             provides LOF scores and maintains a sliding buffer.
         anomaly_threshold : float, optional
-            Initial target false‑positive rate (default 0.05).  The algorithm
-            will try to keep the empirical FPR close to this value by
-            adaptively adjusting :pyattr:`epsilon`.
+            Initial target false‑positive rate (default 0.05).
         min_train : int, optional
             Minimum number of training points required before the detector
             starts producing decisions.  Defaults to 100.
@@ -28,34 +26,12 @@ class StreamingICAD:
             Reference to the underlying model.
         epsilon : float
             Current anomaly threshold used for decision making.
-        target_fpr : float
-            Desired false‑positive rate that drives the epsilon update.
         min_train : int
             Minimum training sample count.
-        recent_anomaly_flags : collections.deque
-            Sliding window of the most recent anomaly decisions (``True``/``False``).
         """
         self.ncm = streaming_ncm
         self.epsilon = anomaly_threshold
-        self.target_epsilon = anomaly_threshold
         self.min_train = min_train
-        self.recent_anomaly_flags = deque(maxlen=self.ncm.calibration_size)
-
-    def _adjust_epsilon(self):
-        """
-        Adjust the anomaly threshold (``epsilon``) toward the target FPR.
-
-        The function computes the empirical false‑positive rate from
-        :pyattr:`recent_anomaly_flags` and moves ``epsilon`` 10 % of the
-        way toward the maximum of the observed FPR and the desired
-        ``target_fpr``.  This smoothing prevents abrupt threshold
-        changes when the stream contains bursts of anomalies.
-        """
-
-        # proportion of recent points that were flagged as anomalies
-        observed_anomalies = np.mean(self.recent_anomaly_flags)
-        # Push ε toward the target (self.target_fpr) but smooth it
-        self.epsilon = 0.9 * self.epsilon + 0.1 * max(observed_fpr, self.target_epsilon)
 
     def _update_quantiles(self):
         """
@@ -123,16 +99,10 @@ class StreamingICAD:
         if p_value > self.epsilon:
             self.ncm.update_calibration(test_score, test_subsequence)
 
-        # Store anomaly flag for recent points
-        anomaly_flag = p_value < self.epsilon
-        self.recent_anomaly_flags.append(anomaly_flag)
-
-        #self._adjust_epsilon()
-
         if return_score:
             is_anomalous = test_score
         else:
-            is_anomalous = anomaly_flag
+            is_anomalous = p_value < self.epsilon
 
         if return_interval:
             low = self.calibration_quantiles["lower"]
