@@ -1,12 +1,13 @@
-from collections import deque
-import numpy as np
-from sklearn.neighbors import NearestNeighbors
-from scipy.spatial.distance import cdist
-
 import copy
+from collections import deque
+
+import numpy as np
+from scipy.spatial.distance import cdist
+from sklearn.neighbors import NearestNeighbors
+
 
 class StreamingNCM:
-    def __init__(self, subsequence_length, neighborhood_size, distance_metric='euclidean', buffer_size=1000, calibration_size=100):
+    def __init__(self, subsequence_length, neighborhood_size, distance_metric="euclidean", buffer_size=1000, calibration_size=100):
         """
         Initialize the Streaming NCM.
 
@@ -28,7 +29,7 @@ class StreamingNCM:
         self.calibration_buffer = deque(maxlen=calibration_size)  # Stores only normal subsequences
         self.calibration_scores = deque(maxlen=calibration_size)  # Stores nonconformity scores for calibration
         self.neighbor_densities = None  # Store precomputed neighbor densities
-        self.kdtree = None # Store precomputed KD-tree
+        self.kdtree = None  # Store precomputed KD-tree
 
     def update(self, new_point, updating_densities=False):
         """
@@ -49,7 +50,7 @@ class StreamingNCM:
                 new_subsequence = np.append(last_subsequence[1:], new_point)
         else:
             if new_point.shape[0] > 1:
-                new_subsequence = np.array([new_point]*self.w)
+                new_subsequence = np.array([new_point] * self.w)
             else:
                 new_subsequence = np.full(self.w, new_point)  # Fill with duplicates initially
 
@@ -75,11 +76,11 @@ class StreamingNCM:
             return
 
         subsequences = np.array(self.training_subsequences)
-        #subsequences = np.array(self.training_subsequences, dtype=np.float32) #32bit precision rather than 64 to half the used memory
+        # subsequences = np.array(self.training_subsequences, dtype=np.float32) #32bit precision rather than 64 to half the used memory
 
         if subsequences.ndim <= 2:
             # Use KDTree since only one feature and euclidian distances (if non-euclidian metric is used the switch to KDTree, also if >20 features.
-            self.kdtree = NearestNeighbors(n_neighbors=self.k, algorithm='kd_tree', metric=self.distance_metric).fit(subsequences)
+            self.kdtree = NearestNeighbors(n_neighbors=self.k, algorithm="kd_tree", metric=self.distance_metric).fit(subsequences)
             distances, indices = self.kdtree.kneighbors(subsequences)
         else:
             distances = cdist(subsequences.reshape(len(subsequences), -1), subsequences.reshape(len(subsequences), -1), metric=self.distance_metric)
@@ -106,7 +107,7 @@ class StreamingNCM:
         subsequences = np.array(self.training_subsequences)
         # If the data is suitable for KD-Tree, we use that since it's alot faster
         if subsequences.ndim <= 2 and self.kdtree is not None:
-            distances, _ = self.kdtree.kneighbors(subsequences)
+            distances, _ = self.kdtree.kneighbors([test_subsequence])
         else:
             distances = cdist([test_subsequence.flatten()], subsequences.reshape(len(subsequences), -1), metric=self.distance_metric).flatten()
 
@@ -131,7 +132,7 @@ class StreamingNCM:
         :param subsequence: The corresponding subsequence.
         """
 
-        #if len(self.calibration_buffer) >= self.calibration_size:
+        # if len(self.calibration_buffer) >= self.calibration_size:
         #    # Move the oldest calibration sequence into the subsequence buffer
         #    self.subsequence_buffer.append(self.calibration_buffer.popleft())
 
@@ -150,24 +151,49 @@ class StreamingNCM:
             return 1.0  # Default high p-value if no calibration data
 
         if smoothed:
-            n = len(np.array(self.calibration_scores))+1
+            n = len(np.array(self.calibration_scores)) + 1
             tau = np.random.uniform(0, 1)
-            return (np.sum(np.array(self.calibration_scores) > test_score) + tau*np.sum(np.array(self.calibration_scores) == test_score))/n
+            return (np.sum(np.array(self.calibration_scores) > test_score) + tau * np.sum(np.array(self.calibration_scores) == test_score)) / n
         else:
             return np.mean(np.array(self.calibration_scores) >= test_score)
 
 
-
 if __name__ == "__main__":
-
     streaming_ncm = StreamingNCM(subsequence_length=3, neighborhood_size=5, buffer_size=500, calibration_size=10)
 
     # Simulated streaming data
     stream_data = [
-       [0, 0], [1, 1], [2, 2], [3, 3], [4, 4],
-       [5, 5], [6, 6], [7, 7], [8, 8], [0, 0], [1, 1], [2, 2], [3, 3], [4, 4],
-       [5, 5], [6, 6], [7, 7], [8, 8], [0, 0], [1, 1], [2, 2], [3, 3], [4, 4],
-       [5, 5], [6, 6], [7, 7], [8, 8], [2000, 2500], [20, 20], [6, 6], [1, 1]
+        [0, 0],
+        [1, 1],
+        [2, 2],
+        [3, 3],
+        [4, 4],
+        [5, 5],
+        [6, 6],
+        [7, 7],
+        [8, 8],
+        [0, 0],
+        [1, 1],
+        [2, 2],
+        [3, 3],
+        [4, 4],
+        [5, 5],
+        [6, 6],
+        [7, 7],
+        [8, 8],
+        [0, 0],
+        [1, 1],
+        [2, 2],
+        [3, 3],
+        [4, 4],
+        [5, 5],
+        [6, 6],
+        [7, 7],
+        [8, 8],
+        [2000, 2500],
+        [20, 20],
+        [6, 6],
+        [1, 1],
     ]
 
     for point in stream_data:
